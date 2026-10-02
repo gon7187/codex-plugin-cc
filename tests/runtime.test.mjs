@@ -1081,21 +1081,21 @@ test("terminalizer that loses the initial claim to running wins the terminal fen
   const initialFile = jobFile.replace(/\.json$/, ".started.json");
   writeJobFile(workspaceRoot, job.id, job);
   upsertJob(workspaceRoot, job);
-  const originalOpen = fs.openSync;
+  const originalLink = fs.linkSync;
   let intercepted = false;
-  fs.openSync = (file, flags, ...rest) => {
-    if (!intercepted && file === initialFile && flags === "wx") {
+  fs.linkSync = (source, file, ...rest) => {
+    if (!intercepted && file === initialFile) {
       intercepted = true;
       fs.writeFileSync(initialFile, JSON.stringify({ status: "running", pid: process.pid, startedAt: "2026-08-19T12:00:00.000Z" }));
     }
-    return originalOpen(file, flags, ...rest);
+    return originalLink(source, file, ...rest);
   };
   try {
     const result = terminalizeTrackedJob(workspaceRoot, job, { status: "cancelled", completedAt: "2026-08-19T12:01:00.000Z" });
     assert.equal(result.claimed, true);
     assert.equal(result.job.status, "cancelled");
   } finally {
-    fs.openSync = originalOpen;
+    fs.linkSync = originalLink;
   }
 });
 
@@ -1218,13 +1218,13 @@ test("removed fence claimed during completion suppresses stale runner output", a
   const terminalFile = resolveTerminalFenceFile(workspaceRoot, job.id);
   const removedFile = jobFile.replace(/\.json$/, ".removed");
   upsertJob(workspaceRoot, job);
-  const originalOpen = fs.openSync;
+  const originalLink = fs.linkSync;
   let runnerInvoked = false;
-  fs.openSync = (file, flags, ...rest) => {
-    if (file === terminalFile && flags === "wx" && !fs.existsSync(removedFile)) {
+  fs.linkSync = (source, file, ...rest) => {
+    if (file === terminalFile && !fs.existsSync(removedFile)) {
       fs.writeFileSync(removedFile, "", "utf8");
     }
-    return originalOpen(file, flags, ...rest);
+    return originalLink(source, file, ...rest);
   };
   try {
     const result = await runTrackedJob(job, async () => {
@@ -1233,7 +1233,7 @@ test("removed fence claimed during completion suppresses stale runner output", a
     });
     assert.equal(result.removed, true);
   } finally {
-    fs.openSync = originalOpen;
+    fs.linkSync = originalLink;
   }
   assert.equal(runnerInvoked, true);
 });
@@ -2229,13 +2229,13 @@ test("cancel reports a completed first terminal outcome without killing the work
     preloadFile,
     [
       'const fs = require("node:fs");',
-      "const originalOpen = fs.openSync;",
+      "const originalLink = fs.linkSync;",
       "let armed = true;",
-      "fs.openSync = (file, flags, ...rest) => {",
-      "  if (armed && file === process.env.CODEX_CANCEL_RACE_FENCE && flags === \"wx\") {",
+      "fs.linkSync = (source, file, ...rest) => {",
+      "  if (armed && file === process.env.CODEX_CANCEL_RACE_FENCE) {",
       "    armed = false; fs.writeFileSync(file, JSON.stringify({ status: \"completed\", completedAt: \"2026-08-19T12:01:00.000Z\" }));",
       "  }",
-      "  return originalOpen(file, flags, ...rest);",
+      "  return originalLink(source, file, ...rest);",
       "};"
     ].join("\n"),
     "utf8"
@@ -3196,13 +3196,13 @@ test("stop gate blocks when removal wins during foreground completion", () => {
   const preload = path.join(makeTempDir(), "terminal-race.cjs");
   fs.writeFileSync(preload, [
     'const fs = require("node:fs");',
-    'const original = fs.openSync;',
+    'const original = fs.linkSync;',
     'let armed = true;',
-    'fs.openSync = (file, flags, ...rest) => {',
-    '  if (armed && file === process.env.CODEX_FOREGROUND_TERMINAL_FENCE && flags === "wx") {',
+    'fs.linkSync = (source, file, ...rest) => {',
+    '  if (armed && file === process.env.CODEX_FOREGROUND_TERMINAL_FENCE) {',
     '    armed = false; fs.writeFileSync(process.env.CODEX_FOREGROUND_REMOVED_FENCE, "");',
     '  }',
-    '  return original(file, flags, ...rest);',
+    '  return original(source, file, ...rest);',
     '};'
   ].join("\n"), "utf8");
   const env = {

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import process from "node:process";
 
@@ -280,19 +281,23 @@ function applyInitialClaim(job, claim) {
 }
 
 function claimFile(file, payload) {
+  const temporaryFile = `${file}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    const descriptor = fs.openSync(file, "wx");
-    try {
-      fs.writeFileSync(descriptor, `${JSON.stringify(payload)}\n`, "utf8");
-    } finally {
-      fs.closeSync(descriptor);
-    }
+    // Publish complete JSON in one step while keeping first-writer-wins claims.
+    fs.writeFileSync(temporaryFile, `${JSON.stringify(payload)}\n`, { encoding: "utf8", flag: "wx" });
+    fs.linkSync(temporaryFile, file);
     return true;
   } catch (error) {
     if (error?.code === "EEXIST") {
       return false;
     }
     throw error;
+  } finally {
+    try {
+      fs.unlinkSync(temporaryFile);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
   }
 }
 
@@ -448,7 +453,7 @@ export async function runTrackedJob(job, runner, options = {}) {
     return applyTerminalFence(storedJob ?? job, initial);
   }
   if (initial?.status === "running") {
-    if (job.gateKey && !storedJob && !isProcessAlive(initial.pid)) {
+    if (job.gateKey && !listJobs(job.workspaceRoot).some((candidate) => candidate.id === job.id) && !isProcessAlive(initial.pid)) {
       return terminalizeTrackedJob(job.workspaceRoot, job, {
         status: "failed",
         phase: "failed",
